@@ -1,0 +1,272 @@
+#include <iostream>
+#include <string.h>
+#include <stdio.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <limits.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <list>
+#include "../include/logger.h"
+#include "../include/global.h"
+#include "../include/client.h"
+#include "../include/server.h"
+#include "../include/address_info.h"
+
+using namespace std;
+static char *client_ip;
+static int client_port;
+static char* client_name = "www.localhost.com";
+static int loggedin = -1;
+int convert_char_to_integer(char* char_arg) {
+	return atoi(char_arg);
+}
+
+/*
+This method is used to check the client input command and perform the operations based on the client.
+Operations include - AUTHOR, IP, PORT, LIST, LOGOUT and EXIT
+*/
+void execute_client_command(char *client_command) {
+	printf("%d\n", loggedin);	
+	if(strncmp(client_command, "AUTHOR", 6) == 0) {
+		const char* author_name = "manjeets";
+		cse4589_print_and_log("[AUTHOR:SUCCESS]\n");
+	cse4589_print_and_log("I, %s, have read and understood the course academic integrity policy.\n", author_name);
+		cse4589_print_and_log("[AUTHOR:END]\n");
+		fflush(stdout);
+	} else if(strncmp(client_command, "IP", 2) == 0 && loggedin == 0) {
+		cse4589_print_and_log("[IP:SUCCESS]\n");
+		cse4589_print_and_log("IP:%s\n", client_ip);
+		cse4589_print_and_log("[IP:END]\n");
+		fflush(stdout);
+	} else if(strncmp(client_command, "PORT", 4) == 0 && loggedin == 0) {
+		cse4589_print_and_log("[PORT:SUCCESS]\n");
+		cse4589_print_and_log("PORT:%d\n", client_port);
+		cse4589_print_and_log("[PORT:END]\n");
+		fflush(stdout);
+	} else {
+		cse4589_print_and_log("[%s:ERROR]\n", client_command);
+		cse4589_print_and_log("invalid command:: %s\n", client_command);
+		cse4589_print_and_log("[%s:END]\n", client_command);
+		fflush(stdout);
+	}
+}
+
+// method for getting IP address of the machine using localhost. Reffered code snippet from Beej guide section 9.7 
+int get_ip_by_name() {
+    struct hostent *he_client;
+    struct in_addr **addr_list_client;
+    int a;
+    if ((he_client = gethostbyname(client_name)) == NULL) {
+        // get the host info
+    	cse4589_print_and_log("error during resolving host IP address. \n");
+        return 1;
+    }
+    addr_list_client = (struct in_addr **) he_client->h_addr_list;
+    for(a = 0; addr_list_client[a] != NULL; a++) {
+        //Return the first one;
+	int ip_length = strlen(inet_ntoa(*addr_list_client[a]));
+	client_ip = (char *)malloc(sizeof(char)*(ip_length));
+        strncpy(client_ip , inet_ntoa(*addr_list_client[a]), ip_length);
+        return 0;
+    }
+    return 1;
+}
+
+int send_message(int listener_client, char *message_buffer) {
+	printf("%d\n", loggedin);
+	strcat(message_buffer, " ");					
+	strncat(message_buffer, client_ip, strlen(client_ip));
+	int sent_bytes_status = send(listener_client,message_buffer,strlen(message_buffer), 0);
+	if (sent_bytes_status <= 0) {
+		close(listener_client);
+		cse4589_print_and_log("CLIENT: Error while writing bytes to server\n");
+		return -1;
+	} else {
+		cse4589_print_and_log("CLIENT: SENT MESSAGE\n");
+		return 1;
+	}
+	return 0;
+}
+
+int receive_message() {
+
+}
+
+/*Method to start client. On starting client application, it gets the IP address of the client machine, port it is running on and redies all the structs and variables for client connection and other chat featurs.
+Reffered this code from Beej guide, server.c for select() statement, with the change that it will not have the statements to accept connection, so this method will create the socket, bind it to the port we pass for listening to 
+and execute stdin commands like LOGIN, SEND, LIST, AUTHOR, IP, PORT, BLOCK, UNBLOCK, BROADCAST, LOGOUT and EXIT 
+Section 7.2 Beej socket programming guide
+*/
+int start_client(char *port_number) {
+	struct address_info addr;
+	addr.ai_family = AF_INET;
+	addr.ai_socktype = SOCK_STREAM;
+	addr.ai_protocol = IPPROTO_TCP;
+	addr.server_port = port_number;
+	addr.host_name = client_name;
+	fd_set read_masterclient;    // master file descriptor list
+	fd_set read_fdsclient;  // temp file descriptor list for select()
+	fd_set write_masterclient;
+	fd_set write_fdsclient;
+	int fdmax_client;        // maximum file descriptor number
+	int listener_client;     // listening socket descriptor
+	int newfd_client = -1;        // newly accept()ed socket descriptor
+	struct sockaddr_storage remoteaddr_client; // client address
+	socklen_t addrlen_client;
+	char read_buffer_client[BUFFER_SIZE];    // buffer for client data
+	int nbytes_client;
+	int yes_client=1;        // for setsockopt() SO_REUSEADDR, below
+	int k, l, rv_client;
+	struct addrinfo hints_client, *ai_client;
+
+	FD_ZERO(&read_masterclient);    // clear the read master and temp sets
+	FD_ZERO(&read_fdsclient);
+	FD_SET(0, &read_masterclient);
+	FD_ZERO(&write_masterclient);   // clear the write master and temp sets
+	FD_ZERO(&write_fdsclient);
+	FD_SET(0, &write_masterclient);
+	
+	//get the machine IP address using localhost as name;
+	get_ip_by_name();
+	//get the machine port and convert from char to integer using atoi()	
+	client_port = convert_char_to_integer(port_number);
+	for(;;) {
+		read_fdsclient = read_masterclient; // copy it  - referred from Beej guide
+		// - referred from Beej guide
+		if (select(fdmax_client+1, &read_fdsclient, NULL, NULL, NULL) == -1) {
+				return 4;
+		}
+		// run through the existing connections looking for data to read - referred from Beej guide
+		for(k = 0; k <= fdmax_client; k++) {
+			if (FD_ISSET(k, &read_fdsclient)) { // we got one!  - referred from Beej guide
+				if(FD_ISSET(STDIN_FILENO, &read_fdsclient)){
+					//user input command
+					char *token_client;
+					int count = 0;
+					fgets(read_buffer_client, sizeof read_buffer_client, stdin);
+					char *temp_char;
+					char *client_cmd;
+					char *server_ipaddress;
+					char *server_port_number;
+					char *msg_buffer;
+					int islogincmd = -1;
+					int issendcmd = -1;
+					token_client = strtok(read_buffer_client, " ");
+					while(token_client != NULL) {
+						temp_char = (char *)malloc(sizeof(char)*(count));
+						strcpy(temp_char, token_client);
+						token_client = strtok(NULL, " ");
+						if(count == 0) {
+							client_cmd = (char *)malloc(sizeof(char)*(strlen(temp_char)));
+							strcpy(client_cmd, temp_char);
+						}
+						if(strncmp(client_cmd, "LOGIN", 5) == 0 &&  islogincmd < 0) {
+							islogincmd = 0;
+							issendcmd = -1;
+						} else if(strncmp(client_cmd, "SEND", 4) == 0 && issendcmd < 0) {
+							issendcmd = 0;
+							islogincmd = -1;
+						}
+						if(islogincmd == 0 && count == 1) {
+							server_ipaddress = (char *)malloc(sizeof(char)*(strlen(temp_char)));
+							strncpy(server_ipaddress, temp_char, strlen(temp_char));
+						} else if(islogincmd == 0 && count == 2) {
+							server_port_number = (char *)malloc(sizeof(char)*(strlen(temp_char)));
+							strncpy(server_port_number, temp_char, 4);
+						}
+						if(issendcmd == 0 && count == 1) {
+							msg_buffer = (char *)malloc(sizeof(char)*(strlen(temp_char)));
+							strncpy(msg_buffer, temp_char, strlen(temp_char));
+						} else if(issendcmd == 0 && count > 2) {
+							strcat(msg_buffer, " ");
+							strncat(msg_buffer, temp_char, strlen(temp_char));
+						}
+						count++;
+					}
+					free(temp_char);
+					free(token_client);
+					if(count == 1) {
+						execute_client_command(client_cmd);
+					}
+					if(strncmp(client_cmd, "LOGIN", 5) == 0) {
+						memset(&hints_client, 0, sizeof hints_client);
+						hints_client.ai_family = AF_INET;
+						hints_client.ai_protocol = IPPROTO_TCP;
+						hints_client.ai_socktype = SOCK_STREAM;
+						hints_client.ai_flags = AI_PASSIVE;
+						char aliasname[128];
+
+						//Get the IP address of the host for binding to socket - referred from Beej guide
+						rv_client=getaddrinfo(server_ipaddress, server_port_number, &hints_client, &ai_client);
+						if(rv_client != 0) {
+							cse4589_print_and_log("getaddrinfo: unable to get addrinfo data. \n");
+						}
+						//Creating a socket - referred from Beej guide
+						listener_client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+						if (listener_client < 0) {
+							cse4589_print_and_log("[CLIENT LISTEN:ERROR] %s\n", client_cmd);
+							return 1;
+						}
+						/*referred to the stack over flow link http://stackoverflow.com/questions/6468113/binding-a-port-number-to-a-tcp-socket-outgoin-to-send-packets; for binding client to socket before establishing socket question
+						*/
+						struct sockaddr_in client;
+						memset(&client, 0, sizeof(client));
+						client.sin_family = AF_INET;
+						client.sin_port = htons(client_port);
+
+						if (bind(listener_client, (const struct sockaddr *)&client, sizeof(client)) < 0) {
+								cse4589_print_and_log("[CLIENT BIND:ERROR] %s\n", client_cmd);
+							return 2;
+						}
+
+						//Trying to connect to server socket - referred from Beej guide
+						if(connect(listener_client, ai_client->ai_addr, ai_client->ai_addrlen) == -1) {
+							close(listener_client);
+							cse4589_print_and_log("[CLIENT CONNECT:ERROR] %s\n", client_cmd);
+							return -1;
+						} else {
+							cse4589_print_and_log("[CLIENT CONNECT:CONNECTION ESTABLISHED] %d\n", newfd_client);
+							if (newfd_client >= fdmax_client)
+								fdmax_client += newfd_client;
+							int temp = newfd_client;
+							FD_SET(newfd_client, &read_masterclient); // add to master set
+							cse4589_print_and_log("[LOGIN:SUCCESS]\n");
+							cse4589_print_and_log("client socket number: %d\n", newfd_client);
+							cse4589_print_and_log("[LOGIN:END]\n");
+							loggedin = 0;
+							fflush(stdout);
+						}
+					} else if(strncmp(client_cmd, "SEND", 4) == 0 && loggedin == 0) {
+						send_message(listener_client, msg_buffer);
+						fflush(stdout);
+					}
+				} else if(k == newfd_client) {
+					cse4589_print_and_log("in nbytes_client condition\n");
+					// handle data from a client - referred from Beej guide
+					nbytes_client = recv(k, read_buffer_client, sizeof read_buffer_client, 0);
+					if (nbytes_client <= 0) {
+						// got error or connection closed by client
+						if (nbytes_client == 0) {
+							// connection closed
+							cse4589_print_and_log("selectserver: socket %d hung up\n", k);
+						} else {
+							cse4589_print_and_log("recv");
+						}
+						close(k); // bye! - referred from Beej guide
+						FD_CLR(k, &read_masterclient); // remove from master set
+						FD_CLR(k, &write_masterclient);
+					} else {
+
+					}
+				}
+			}
+		}
+	}
+	return 0;
+}

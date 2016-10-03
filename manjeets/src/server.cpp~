@@ -1,0 +1,243 @@
+#include <iostream>
+#include <string.h>
+#include <stdio.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <limits.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <list>
+#include "../include/logger.h"
+#include "../include/global.h"
+#include "../include/server.h"
+#include "../include/address_info.h"
+
+using namespace std;
+
+char ipstr[INET_ADDRSTRLEN];
+int port;
+char* hostname = "www.localhost.com";
+
+int convert_char_int(char* arg) {
+	return atoi(arg);
+}
+
+// get sockaddr, IPv4: code from beej guide
+void *get_in_addr(struct sockaddr *sa) {
+	return &(((struct sockaddr_in*)sa)->sin_addr);
+}
+
+void findAddress(struct addrinfo *hints, struct addrinfo *ai) {
+	void *addr;
+	// get the pointer to the address itself,
+	struct sockaddr_in *ipv4 = (struct sockaddr_in *)ai->ai_addr;
+	addr = &(ipv4->sin_addr);
+	//convert the IP to a string and print it:
+	inet_ntop(ai->ai_family, addr, ipstr, INET_ADDRSTRLEN);
+}
+
+void execute_commands(char *command) {
+	if(strncmp(command, "AUTHOR", 6) == 0) {
+		const char* name = "manjeets";
+		cse4589_print_and_log("[AUTHOR:SUCCESS]\n");
+	cse4589_print_and_log("I, %s, have read and understood the course academic integrity policy.\n", name);
+		cse4589_print_and_log("[AUTHOR:END]\n");
+		fflush(stdout);
+	} else if(strncmp(command, "IP", 2) == 0) {
+		cse4589_print_and_log("[IP:SUCCESS]\n");
+		cse4589_print_and_log("IP:%s\n", ipstr);
+		cse4589_print_and_log("[IP:END]\n");
+		fflush(stdout);
+	} else if(strncmp(command, "PORT", 4) == 0) {
+		cse4589_print_and_log("[PORT:SUCCESS]\n");
+		cse4589_print_and_log("PORT:%d\n", port);
+		cse4589_print_and_log("[PORT:END]\n");
+		fflush(stdout);
+	} else {
+		cse4589_print_and_log("[%s:ERROR]\n", command);
+		cse4589_print_and_log("invalid command:: %s\n", command);
+		cse4589_print_and_log("[%s:END]\n", command);
+		fflush(stdout);
+	}	
+}
+
+int get_ip_by_hostname(char* host_address) {
+    struct hostent *he;
+    struct in_addr **addr_list;
+    int i;
+    if ((he = gethostbyname(host_address)) == NULL) {
+        // get the host info
+    	cse4589_print_and_log("error during resolving host IP address. \n");
+        return 1;
+    }
+    addr_list = (struct in_addr **) he->h_addr_list;
+    for(i = 0; addr_list[i] != NULL; i++) {
+        //Return the first one;
+        strcpy(ipstr , inet_ntoa(*addr_list[i]) );
+        return 0;
+    }
+    return 1;
+}
+
+int create_server_connection (char *input_port) {
+	struct address_info addr;
+	addr.ai_family = AF_INET;
+	addr.ai_socktype = SOCK_STREAM;
+	addr.ai_protocol = IPPROTO_TCP;
+	addr.server_port = input_port;
+	addr.host_name = hostname;
+	fd_set read_master;    // master file descriptor list
+	fd_set read_fds;  // temp file descriptor list for select()
+	fd_set write_master;
+	fd_set write_fds;
+	int fdmax;        // maximum file descriptor number
+	int listener;     // listening socket descriptor
+	int newfd;        // newly accept()ed socket descriptor
+	struct sockaddr_storage remoteaddr; // client address
+	socklen_t addrlen;
+	char read_buffer[BUFFER_SIZE];    // buffer for client data
+	int nbytes;
+	char remoteIP[INET_ADDRSTRLEN];
+	int yes=1;        // for setsockopt() SO_REUSEADDR, below
+	int i, j, rv;
+	int CLIENTS = 4;
+	struct addrinfo hints, *ai;
+
+	FD_ZERO(&read_master);    // clear the read master and temp sets
+	FD_ZERO(&read_fds);
+	FD_SET(0, &read_master);	
+	FD_ZERO(&write_master);   // clear the write master and temp sets		
+	FD_ZERO(&write_fds);
+	FD_SET(0, &write_master);
+	
+	//char* hostname = (const char *)"www.localhost.com";
+	get_ip_by_hostname(hostname);
+	port = convert_char_int(addr.server_port);
+
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_INET;
+	hints.ai_protocol = IPPROTO_TCP;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_PASSIVE;
+	char name[128];
+	gethostname(name, sizeof name);
+	//Get the IP address of the host for binding to socket
+	//findAddress(&hints, &ai);
+	if((rv = getaddrinfo(NULL, addr.server_port, &hints, &ai)) != 0) {       
+		cse4589_print_and_log("getaddrinfo: unable to get addrinfo data. \n");
+     }
+
+	listener = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+		if (listener < 0) { 
+		return 1;
+	}
+
+	// lose the pesky "address already in use" error message
+	setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
+
+	if (bind(listener, ai->ai_addr, ai->ai_addrlen) < 0) {
+		close(listener);
+		return 2;
+	}
+
+	// if we got here, it means we didn't get bound
+	if (ai == NULL) {
+		cse4589_print_and_log("selectserver: failed to bind. \n");
+		return 2;
+	}
+
+	freeaddrinfo(ai); // all done with this
+
+	// listen
+	if (listen(listener, CLIENTS_MAX_SIZE) == -1) {
+		cse4589_print_and_log("listen");
+		return 3;
+	}
+
+	// add the listener to the master set
+	FD_SET(listener, &read_master);
+
+	// keep track of the biggest file descriptor
+	fdmax = listener; // so far, it's this one	
+	cse4589_print_and_log("server listening for connections on port: %d\n", port);
+	for(;;) {
+		read_fds = read_master; // copy it
+		if (select(fdmax+1, &read_fds, NULL, NULL, NULL) == -1) {
+		        return 4;
+		}
+        // run through the existing connections looking for data to read
+        for(i = 0; i <= fdmax; i++) {
+			if (FD_ISSET(i, &read_fds)) { // we got one!!
+				if (i == listener) {
+				// handle new connections
+					addrlen = sizeof remoteaddr;
+					newfd = accept(listener, (struct sockaddr *)&remoteaddr, &addrlen);
+					if (newfd == -1) {
+						cse4589_print_and_log("accept");
+					} else {
+						FD_SET(newfd, &read_master); // add to master set
+						if (newfd > fdmax) {    // keep track of the max
+						    fdmax = newfd;
+					}
+						cse4589_print_and_log("selectserver: new connection from %s on "
+                				"socket %d\n", inet_ntop(remoteaddr.ss_family,
+                						get_in_addr((struct sockaddr*)&remoteaddr), remoteIP,
+                						INET6_ADDRSTRLEN), newfd);
+					}
+				} else if(FD_ISSET(STDIN_FILENO, &read_fds)){
+				//user input command
+					char *token;
+					int counter = 0;
+					fgets(read_buffer, sizeof read_buffer, stdin);
+					char *command_input;
+					token = strtok(read_buffer, " ");
+					while(token != NULL) {
+						command_input = (char *)malloc(sizeof(char)*(counter));
+						strcpy(command_input, token);
+						token = strtok(NULL, " ");
+						counter++;
+					}
+
+					if(counter == 1)
+						execute_commands(command_input);
+				} else {
+					cse4589_print_and_log("in nbytes condition\n");
+					// handle data from a client
+					nbytes = recv(i, read_buffer, sizeof read_buffer, 0);
+					printf("%s\n", read_buffer);
+					if (nbytes <= 0) {
+						// got error or connection closed by client
+						if (nbytes == 0) {
+							// connection closed
+							cse4589_print_and_log("selectserver: socket connection %d closed\n", i);
+						} else {
+							cse4589_print_and_log("recv");
+						}
+						close(i); // bye!
+						FD_CLR(i, &read_master); // remove from master set
+						FD_CLR(i, &write_master);
+					} else {
+						// we got some data from a client
+						for(j = 0; j <= fdmax; j++) {
+							// send to everyone!
+							if (FD_ISSET(j, &read_master)) {
+							// except the listener and ourselves
+							if (j != listener && j != i) {
+								if (send(j, read_buffer, nbytes, 0) == -1) {
+									cse4589_print_and_log("send");
+								}
+							}
+							}
+						}
+					}
+				} // END handle data from client
+		     } // END got new incoming connection
+		} // END looping through file descriptors
+    }
+	return 0;	
+}

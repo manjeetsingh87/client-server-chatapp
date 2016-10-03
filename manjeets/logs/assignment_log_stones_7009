@@ -1,0 +1,17 @@
+[LOGIN:SUCCESS]
+[LOGIN:END]
+[LIST:SUCCESS]
+1    metallica.cse.buffalo.edu          128.205.36.24       5000    
+2    stones.cse.buffalo.edu             128.205.36.46       7009    
+[LIST:END]
+[RFRESH
+:ERROR]
+invalid command:: RFRESH
+
+[RFRESH
+:END]
+[REFRESH:SUCCESS]
+[REFRESH:END]
+[LIST:SUCCESS]
+1    stones.cse.buffalo.edu             128.205.36.46       7009    
+[LIST:END]

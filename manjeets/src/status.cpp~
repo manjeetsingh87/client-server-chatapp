@@ -1,0 +1,38 @@
+#include <stdlib.h> 
+#include <stdio.h>
+#include "../include/status.h"
+
+static struct Status *current, *newNode;
+
+void add_ip_to_statuslist(char* ip_address, char* status, bool is_server) {
+	head = (struct Status *)malloc(sizeof(struct Status));
+	current = (struct Status *)malloc(sizeof(struct Status));
+	newNode = (struct Status*)malloc(sizeof(struct Status));
+	if(NULL == newNode) {
+		exit(-1);
+	} 
+	newNode->ip_address = ip_address;
+	newNode->user_status = status;
+	newNode->is_server = is_server;
+	newNode->next = NULL;
+	if(head->next == NULL) {
+		head->next = newNode;
+		printf("added new node at beginning\n");
+	} else {
+		current = head;
+		while(current->next != NULL) {
+			current = current->next;
+		}		
+		current->next = newNode;
+		printf("added a node now\n");
+	}
+}
+
+bool get_user_status(char* ip_address) {
+				
+}
+
+void update_user_status(char* ip_address, char* status, bool is_server) {
+	struct Status *ptr = (struct Status*)malloc(sizeof(struct Status));
+			
+}
